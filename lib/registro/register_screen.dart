@@ -1,8 +1,12 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 
 import '../models/user_role.dart';
+import '../servicios/avatar_service.dart';
 import '../servicios/customer_service.dart';
 import '../servicios/rider_service.dart';
+import '../widgets/profile_photo.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key, required this.role});
@@ -22,6 +26,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _storeName = TextEditingController();
   final _address = TextEditingController();
   VehicleType? _vehicle;
+  Uint8List? _photo;
   bool _hidePassword = true;
   bool _loading = false;
 
@@ -68,6 +73,17 @@ class _RegisterScreenState extends State<RegisterScreen> {
           email: _email.text.trim(),
           password: _password.text,
         );
+      }
+      // Foto opcional: si ya hay sesión se sube ahora; si falta confirmar el
+      // email, queda guardada en el dispositivo y se sube en el primer ingreso.
+      final photo = _photo;
+      if (photo != null) {
+        final avatars = AvatarService();
+        if (needsConfirm) {
+          await avatars.savePending(_email.text.trim(), photo);
+        } else {
+          await avatars.uploadSilently(photo);
+        }
       }
       if (!mounted) return;
       Navigator.of(context).pop();
@@ -116,6 +132,23 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   children: [
                     Text(role.description, style: text.bodyLarge),
                     const SizedBox(height: 24),
+                    Center(
+                      child: ProfilePhotoPicker(
+                        name: _name.text,
+                        color: role.color,
+                        bytes: _photo,
+                        radius: 44,
+                        onPicked: (b) => setState(() => _photo = b),
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Center(
+                      child: Text(
+                        'Foto de perfil (opcional)',
+                        style: text.bodySmall?.copyWith(color: Colors.black54),
+                      ),
+                    ),
+                    const SizedBox(height: 24),
                     if (role == UserRole.store) ...[
                       TextFormField(
                         controller: _storeName,
@@ -154,14 +187,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       DropdownButtonFormField<VehicleType>(
                         initialValue: _vehicle,
                         decoration:
-                        const InputDecoration(labelText: 'Tu vehículo'),
+                            const InputDecoration(labelText: 'Tu vehículo'),
                         items: [
                           for (final v in VehicleType.values)
                             DropdownMenuItem(value: v, child: Text(v.label)),
                         ],
                         onChanged: (v) => setState(() => _vehicle = v),
                         validator: (v) =>
-                        v == null ? 'Elegí un vehículo' : null,
+                            v == null ? 'Elegí un vehículo' : null,
                       ),
                       const SizedBox(height: 8),
                       Text(
@@ -211,13 +244,13 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       ),
                       child: _loading
                           ? const SizedBox(
-                        height: 20,
-                        width: 20,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Colors.white,
-                        ),
-                      )
+                              height: 20,
+                              width: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
                           : const Text('Crear cuenta'),
                     ),
                   ],

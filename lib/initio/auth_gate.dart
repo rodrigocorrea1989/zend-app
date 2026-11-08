@@ -34,7 +34,7 @@ class _AuthGateState extends State<AuthGate> {
       case UserRole.customer:
         return const CustomerHomeScreen();
       case UserRole.store:
-      // Todavía no existe ese menú: no dejamos sesión abierta.
+        // Todavía no existe ese menú: no dejamos sesión abierta.
         await _auth.logout();
         return const MyHomePage(title: 'Zend');
       case null:

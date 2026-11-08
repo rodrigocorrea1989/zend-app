@@ -6,7 +6,6 @@ import '../rider/rider_home_screen.dart';
 import '../servicios/auth_service.dart';
 import '../servicios/rider_service.dart' show RegistroException;
 
-
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
 
@@ -50,15 +49,15 @@ class _LoginScreenState extends State<LoginScreen> {
         case UserRole.rider:
           Navigator.of(context).pushAndRemoveUntil(
             MaterialPageRoute(builder: (_) => const RiderHomeScreen()),
-                (route) => false,
+            (route) => false,
           );
         case UserRole.customer:
           Navigator.of(context).pushAndRemoveUntil(
             MaterialPageRoute(builder: (_) => const CustomerHomeScreen()),
-                (route) => false,
+            (route) => false,
           );
         case UserRole.store:
-        // Todavía no existe ese menú: no dejamos sesión abierta.
+          // Todavía no existe ese menú: no dejamos sesión abierta.
           await _auth.logout();
           if (!mounted) return;
           _showMessage(
@@ -142,13 +141,13 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                       child: _loading
                           ? const SizedBox(
-                        height: 20,
-                        width: 20,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Colors.white,
-                        ),
-                      )
+                              height: 20,
+                              width: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
                           : const Text('Ingresar'),
                     ),
                   ],

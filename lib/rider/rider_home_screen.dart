@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -8,7 +10,10 @@ import '../servicios/auth_service.dart';
 import '../servicios/courier_service.dart';
 import '../servicios/order_service.dart';
 import '../servicios/rider_service.dart' show RegistroException;
+import '../servicios/avatar_service.dart';
 import '../widgets/order_cards.dart';
+import '../widgets/profile_photo.dart';
+import 'rider_history_screen.dart';
 
 /// Menú principal del rider.
 class RiderHomeScreen extends StatefulWidget {
@@ -22,6 +27,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
   final _courierService = CourierService();
   final _authService = AuthService();
   final _orders = OrderService();
+  final _avatars = AvatarService();
 
   CourierInfo? _info;
   List<DeliveryOrder> _available = [];
@@ -31,6 +37,8 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
   bool _loading = true;
   bool _toggling = false;
   bool _advancing = false;
+  bool _uploadingPhoto = false;
+  String? _avatarPath;
   String? _error;
 
   Color get _color => UserRole.rider.color;
@@ -40,6 +48,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
     super.initState();
     _load();
     _subscribe();
+    _syncAvatar();
   }
 
   @override
@@ -54,13 +63,13 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
     _channel = Supabase.instance.client
         .channel('rider-orders')
         .onPostgresChanges(
-      event: PostgresChangeEvent.all,
-      schema: 'public',
-      table: 'orders',
-      callback: (_) {
-        if (mounted) _loadOrders();
-      },
-    )
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'orders',
+          callback: (_) {
+            if (mounted) _loadOrders();
+          },
+        )
         .subscribe();
   }
 
@@ -121,6 +130,31 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
     }
     if (mounted) setState(() => _acceptingId = null);
     await _loadOrders();
+  }
+
+  // Sube la foto elegida en el registro (si quedó pendiente) y lee la actual.
+  Future<void> _syncAvatar() async {
+    var path = await _avatars.uploadPendingIfAny();
+    path ??= await _avatars.currentPath();
+    if (!mounted) return;
+    setState(() => _avatarPath = path);
+  }
+
+  Future<void> _changePhoto(Uint8List bytes) async {
+    if (_uploadingPhoto) return;
+    setState(() => _uploadingPhoto = true);
+    try {
+      final path = await _avatars.upload(bytes);
+      if (!mounted) return;
+      setState(() => _avatarPath = path);
+    } on RegistroException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(e.message)));
+      }
+    } finally {
+      if (mounted) setState(() => _uploadingPhoto = false);
+    }
   }
 
   Future<void> _advance(DeliveryOrder order) async {
@@ -199,7 +233,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
     if (!mounted) return;
     Navigator.of(context).pushAndRemoveUntil(
       MaterialPageRoute(builder: (_) => const MyHomePage(title: 'Zend')),
-          (route) => false,
+      (route) => false,
     );
   }
 
@@ -224,6 +258,13 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
           ],
         ),
         actions: [
+          IconButton(
+            tooltip: 'Historial de entregas',
+            icon: const Icon(Icons.history),
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const RiderHistoryScreen()),
+            ),
+          ),
           IconButton(
             tooltip: 'Cerrar sesión',
             icon: const Icon(Icons.logout),
@@ -254,7 +295,13 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
             physics: const AlwaysScrollableScrollPhysics(),
             padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
             children: [
-              _Header(info: info, color: _color),
+              _Header(
+                info: info,
+                color: _color,
+                avatarPath: _avatarPath,
+                uploadingPhoto: _uploadingPhoto,
+                onPhoto: _changePhoto,
+              ),
               const SizedBox(height: 24),
               if (info.status != CourierStatus.approved) ...[
                 _StatusBanner(status: info.status),
@@ -295,44 +342,68 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
 }
 
 class _Header extends StatelessWidget {
-  const _Header({required this.info, required this.color});
+  const _Header({
+    required this.info,
+    required this.color,
+    required this.avatarPath,
+    required this.uploadingPhoto,
+    required this.onPhoto,
+  });
 
   final CourierInfo info;
   final Color color;
+  final String? avatarPath;
+  final bool uploadingPhoto;
+  final ValueChanged<Uint8List> onPhoto;
 
   @override
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
     final firstName = info.name.trim().split(' ').first;
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    return Row(
       children: [
-        Text(
-          firstName.isEmpty ? '¡Hola!' : '¡Hola, $firstName!',
-          style: text.headlineMedium?.copyWith(
-            fontWeight: FontWeight.w800,
-            letterSpacing: -0.5,
-          ),
+        ProfilePhotoPicker(
+          name: info.name,
+          color: color,
+          path: avatarPath,
+          busy: uploadingPhoto,
+          radius: 38,
+          onPicked: onPhoto,
         ),
-        const SizedBox(height: 12),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            _InfoChip(
-              icon: Icons.electric_bike_outlined,
-              label: info.vehicle.label,
-              color: color,
-            ),
-            _InfoChip(
-              icon: Icons.star_rounded,
-              label: info.rating > 0
-                  ? info.rating.toStringAsFixed(1)
-                  : 'Sin calificaciones',
-              color: color,
-            ),
-          ],
+        const SizedBox(width: 16),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                firstName.isEmpty ? '¡Hola!' : '¡Hola, $firstName!',
+                style: text.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: -0.5,
+                ),
+              ),
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  _InfoChip(
+                    icon: Icons.electric_bike_outlined,
+                    label: info.vehicle.label,
+                    color: color,
+                  ),
+                  _InfoChip(
+                    icon: Icons.star_rounded,
+                    label: info.rating > 0
+                        ? info.rating.toStringAsFixed(1)
+                        : 'Sin calificaciones',
+                    color: color,
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
       ],
     );
@@ -450,7 +521,7 @@ class _OnlineCard extends StatelessWidget {
               return Colors.grey.shade400;
             }),
             trackOutlineColor:
-            const WidgetStatePropertyAll(Colors.transparent),
+                const WidgetStatePropertyAll(Colors.transparent),
           ),
         ],
       ),

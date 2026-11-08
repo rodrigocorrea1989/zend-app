@@ -4,6 +4,12 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/delivery_order.dart';
 import 'rider_service.dart' show RegistroException;
 
+class _Contact {
+  const _Contact(this.name, this.avatarPath);
+  final String name;
+  final String? avatarPath;
+}
+
 class OrderService {
   OrderService({SupabaseClient? client})
       : _client = client ?? Supabase.instance.client;
@@ -20,21 +26,34 @@ class OrderService {
     return uid;
   }
 
-  /// Nombre de la otra parte de cada pedido aceptado (ver order_contacts.sql).
-  /// Si la función todavía no existe o falla, la app sigue andando sin nombres.
-  Future<Map<String, String>> _contacts() async {
+  /// Nombre y foto de la otra parte de cada pedido aceptado
+  /// (ver order_contacts.sql). Si la función falla, la app sigue sin ellos.
+  Future<Map<String, _Contact>> _contacts() async {
     try {
       final rows = await _client.rpc('order_contacts') as List;
-      final map = <String, String>{};
+      final map = <String, _Contact>{};
       for (final r in rows) {
         final name = (r['contact_name'] as String?) ?? '';
-        if (name.trim().isNotEmpty) map[r['order_id'] as String] = name;
+        if (name.trim().isEmpty) continue;
+        map[r['order_id'] as String] =
+            _Contact(name, r['contact_avatar'] as String?);
       }
       return map;
     } catch (e) {
       debugPrint('order_contacts falló: $e');
       return {};
     }
+  }
+
+  List<DeliveryOrder> _withContacts(
+    List<Map<String, dynamic>> rows,
+    Map<String, _Contact> contacts,
+  ) {
+    return rows.map((m) {
+      final o = DeliveryOrder.fromMap(m);
+      final c = contacts[o.id];
+      return o.withContact(c?.name, c?.avatarPath);
+    }).toList();
   }
 
   // ---------- Customer ----------
@@ -69,11 +88,7 @@ class OrderService {
           .eq('customer_id', uid)
           .order('created_at', ascending: false)
           .limit(50);
-      final contacts = await _contacts();
-      return rows.map((m) {
-        final o = DeliveryOrder.fromMap(m);
-        return o.withContact(contacts[o.id]);
-      }).toList();
+      return _withContacts(rows, await _contacts());
     } on PostgrestException {
       throw RegistroException('No pudimos cargar tus pedidos.');
     } catch (_) {
@@ -111,10 +126,31 @@ class OrderService {
           .maybeSingle();
       if (row == null) return null;
       final order = DeliveryOrder.fromMap(row);
-      final contacts = await _contacts();
-      return order.withContact(contacts[order.id]);
+      final c = (await _contacts())[order.id];
+      return order.withContact(c?.name, c?.avatarPath);
     } on PostgrestException {
       throw RegistroException('No pudimos cargar tu pedido activo.');
+    } catch (_) {
+      throw RegistroException(_noNet);
+    }
+  }
+
+  /// Historial del rider: sus últimas 100 entregas, de la más nueva a la
+  /// más vieja.
+  Future<List<DeliveryOrder>> deliveredOrders() async {
+    final uid = _uid;
+    try {
+      final rows = await _client
+          .from('orders')
+          .select()
+          .eq('courier_id', uid)
+          .eq('status', 'delivered')
+          .order('delivered_at', ascending: false)
+          .limit(100);
+      return _withContacts(rows, await _contacts());
+    } on PostgrestException catch (e) {
+      debugPrint('historial falló: ${e.code} ${e.message}');
+      throw RegistroException('No pudimos cargar tu historial.');
     } catch (_) {
       throw RegistroException(_noNet);
     }
@@ -125,14 +161,14 @@ class OrderService {
   Future<OrderStatus> advance(String orderId) async {
     try {
       final res =
-      await _client.rpc('advance_order', params: {'p_order_id': orderId});
+          await _client.rpc('advance_order', params: {'p_order_id': orderId});
       return OrderStatus.fromDb(res as String?);
     } on PostgrestException catch (e) {
       debugPrint('advance_order falló: ${e.code} ${e.message}');
       if (e.code == 'PGRST202') {
         throw RegistroException(
             'Falta crear la función advance_order en Supabase '
-                '(ejecutá supabase/order_progress.sql).');
+            '(ejecutá supabase/order_progress.sql).');
       }
       if (e.message.contains('not_found')) {
         throw RegistroException('No encontramos ese pedido.');
@@ -140,7 +176,8 @@ class OrderService {
       if (e.message.contains('invalid_state')) {
         throw RegistroException('Ese pedido ya fue entregado o cancelado.');
       }
-      throw RegistroException('No pudimos actualizar el pedido. Intentá de nuevo.');
+      throw RegistroException(
+          'No pudimos actualizar el pedido. Intentá de nuevo.');
     } catch (_) {
       throw RegistroException(_noNet);
     }

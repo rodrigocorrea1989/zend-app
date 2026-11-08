@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -8,7 +10,9 @@ import '../servicios/auth_service.dart';
 import '../servicios/customer_service.dart';
 import '../servicios/order_service.dart';
 import '../servicios/rider_service.dart' show RegistroException;
+import '../servicios/avatar_service.dart';
 import '../widgets/order_cards.dart';
+import '../widgets/profile_photo.dart';
 import 'new_order_screen.dart';
 
 class CustomerHomeScreen extends StatefulWidget {
@@ -22,9 +26,12 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
   final _orders = OrderService();
   final _customers = CustomerService();
   final _auth = AuthService();
+  final _avatars = AvatarService();
 
   List<DeliveryOrder> _list = [];
   String _name = '';
+  String? _avatarPath;
+  bool _uploadingPhoto = false;
   bool _loading = true;
   String? _error;
   RealtimeChannel? _channel;
@@ -36,6 +43,7 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
     super.initState();
     _load();
     _subscribe();
+    _syncAvatar();
   }
 
   @override
@@ -50,13 +58,13 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
     _channel = Supabase.instance.client
         .channel('customer-orders')
         .onPostgresChanges(
-      event: PostgresChangeEvent.all,
-      schema: 'public',
-      table: 'orders',
-      callback: (_) {
-        if (mounted) _load();
-      },
-    )
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'orders',
+          callback: (_) {
+            if (mounted) _load();
+          },
+        )
         .subscribe();
   }
 
@@ -67,7 +75,7 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
       if (!mounted) return;
       final before = {for (final o in _list) o.id: o.status};
       final justDelivered = list.any((o) =>
-      before[o.id] != null &&
+          before[o.id] != null &&
           before[o.id] != OrderStatus.delivered &&
           o.status == OrderStatus.delivered);
       setState(() {
@@ -91,6 +99,31 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
     }
   }
 
+  // Sube la foto elegida en el registro (si quedó pendiente) y lee la actual.
+  Future<void> _syncAvatar() async {
+    var path = await _avatars.uploadPendingIfAny();
+    path ??= await _avatars.currentPath();
+    if (!mounted) return;
+    setState(() => _avatarPath = path);
+  }
+
+  Future<void> _changePhoto(Uint8List bytes) async {
+    if (_uploadingPhoto) return;
+    setState(() => _uploadingPhoto = true);
+    try {
+      final path = await _avatars.upload(bytes);
+      if (!mounted) return;
+      setState(() => _avatarPath = path);
+    } on RegistroException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(e.message)));
+      }
+    } finally {
+      if (mounted) setState(() => _uploadingPhoto = false);
+    }
+  }
+
   Future<void> _newOrder() async {
     final created = await Navigator.of(context).push<bool>(
       MaterialPageRoute(builder: (_) => const NewOrderScreen()),
@@ -108,7 +141,7 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
     if (!mounted) return;
     Navigator.of(context).pushAndRemoveUntil(
       MaterialPageRoute(builder: (_) => const MyHomePage(title: 'Zend')),
-          (route) => false,
+      (route) => false,
     );
   }
 
@@ -184,15 +217,35 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
             physics: const AlwaysScrollableScrollPhysics(),
             padding: const EdgeInsets.fromLTRB(24, 8, 24, 96),
             children: [
-              Text(
-                firstName.isEmpty ? '¡Hola!' : '¡Hola, $firstName!',
-                style: text.headlineMedium?.copyWith(
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: -0.5,
-                ),
+              Row(
+                children: [
+                  ProfilePhotoPicker(
+                    name: _name,
+                    color: _color,
+                    path: _avatarPath,
+                    busy: _uploadingPhoto,
+                    radius: 34,
+                    onPicked: _changePhoto,
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          firstName.isEmpty ? '¡Hola!' : '¡Hola, $firstName!',
+                          style: text.headlineSmall?.copyWith(
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: -0.5,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text('Tus pedidos', style: text.titleMedium),
+                      ],
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(height: 4),
-              Text('Tus pedidos', style: text.titleMedium),
               const SizedBox(height: 16),
               if (_list.isEmpty)
                 Container(
@@ -285,7 +338,7 @@ class _OrderTile extends StatelessWidget {
               const SizedBox(width: 8),
               Container(
                 padding:
-                const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(
                   color: sc.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(20),
@@ -309,7 +362,7 @@ class _OrderTile extends StatelessWidget {
             OrderContactLine(
               label: 'Tu rider',
               name: order.contactName!,
-              icon: Icons.pedal_bike,
+              avatarPath: order.contactAvatarPath,
               color: color,
             ),
           ],

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/delivery_order.dart';
+import 'profile_photo.dart';
 
 /// Origen → destino en vertical.
 class OrderRoute extends StatelessWidget {
@@ -86,14 +87,14 @@ class OrderContactLine extends StatelessWidget {
     super.key,
     required this.label,
     required this.name,
-    required this.icon,
     required this.color,
+    this.avatarPath,
   });
 
   final String label;
   final String name;
-  final IconData icon;
   final Color color;
+  final String? avatarPath;
 
   @override
   Widget build(BuildContext context) {
@@ -106,7 +107,7 @@ class OrderContactLine extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Icon(icon, size: 20, color: color),
+          UserAvatar(name: name, path: avatarPath, color: color, radius: 16),
           const SizedBox(width: 10),
           Expanded(
             child: Text.rich(
@@ -181,11 +182,11 @@ class AvailableOrderCard extends StatelessWidget {
             ),
             child: busy
                 ? const SizedBox(
-              height: 20,
-              width: 20,
-              child: CircularProgressIndicator(
-                  strokeWidth: 2, color: Colors.white),
-            )
+                    height: 20,
+                    width: 20,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: Colors.white),
+                  )
                 : const Text('Aceptar pedido'),
           ),
         ],
@@ -244,7 +245,7 @@ class ActiveOrderCard extends StatelessWidget {
             OrderContactLine(
               label: 'Pedido de',
               name: order.contactName!,
-              icon: Icons.person_outline,
+              avatarPath: order.contactAvatarPath,
               color: color,
             ),
           ],
@@ -270,14 +271,14 @@ class ActiveOrderCard extends StatelessWidget {
               ),
               icon: advancing
                   ? const SizedBox(
-                height: 18,
-                width: 18,
-                child: CircularProgressIndicator(
-                    strokeWidth: 2, color: Colors.white),
-              )
+                      height: 18,
+                      width: 18,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: Colors.white),
+                    )
                   : Icon(order.status == OrderStatus.pickedUp
-                  ? Icons.check_circle_outline
-                  : Icons.inventory_2_outlined),
+                      ? Icons.check_circle_outline
+                      : Icons.inventory_2_outlined),
               label: Text(order.status == OrderStatus.pickedUp
                   ? 'Confirmar entrega'
                   : 'Ya retiré el pedido'),
